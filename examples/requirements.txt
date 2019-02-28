@@ -1,0 +1,6 @@
+pytest==4.3.0
+requests==2.21.0
+bs4==0.0.1
+PySocks==1.6.8
+stem==1.7.1
+htmllistparse==0.5
