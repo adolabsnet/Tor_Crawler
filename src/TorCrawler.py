@@ -1,12 +1,11 @@
 """Base class for webcrawler that communicates with Tor client."""
 
-import socket
-import socks
 import requests
 from bs4 import BeautifulSoup
 import time
 import warnings
 import os
+import sys
 from collections import defaultdict
 
 # Stem is a module for dealing with tor
@@ -96,51 +95,52 @@ class TorCrawler(object):
         use_tor=True
     ):
         """Set initialization arguments."""
-        # Number of requests that have been made since last ip change
-        self.req_i = 0
-
-        # The number of consecutive requests made with the same IP.
-        self.n_requests = n_requests
-
-        # Do we want to use tor?
-        self.use_tor = use_tor
-
-        # Do we want to rotate IPs with tor?
-        self.rotate_ips = rotate_ips
-
-        # Enforce rotation of IPs (if true, redraw circuit until IP is changed)
-        self.enforce_rotate = enforce_rotate
-
-        # The threshold at which we can stop trying to rotate IPs and accept
-        # the new path. This value is capped at 100 because we don't want to
-        # kill the tor network.
-        self.enforce_limit = min(100, enforce_limit)
-
-        # SOCKS5 params
-        self.tor_port = socks_port
-        self.tor_host = socks_host
-
-        # The tor controller that will be used to receive signals
-        self.ctrl_port = ctrl_port
-
-        self.tor_controller = None
-        if self.use_tor:
-            self._setTorController()
+        self.session = requests.session()
 
         # Use BeautifulSoup to parse html GET requests
         self.use_bs = use_bs
 
-        # The control port password
-        self.ctrl_pass = None
-        self._setCtrlPass(ctrl_pass)
-        self._startSocks()
+        # Do we want to use tor?
+        self.use_tor = use_tor
+        if self.use_tor:
+            # Number of requests that have been made since last ip change
+            self.req_i = 0
+
+            # The number of consecutive requests made with the same IP.
+            self.n_requests = n_requests
+
+            # Do we want to rotate IPs with tor?
+            self.rotate_ips = rotate_ips
+
+            # Enforce rotation of IPs (if true, redraw circuit until IP is changed)
+            self.enforce_rotate = enforce_rotate
+
+            # The threshold at which we can stop trying to rotate IPs and accept
+            # the new path. This value is capped at 100 because we don't want to
+            # kill the tor network.
+            self.enforce_limit = min(100, enforce_limit)
+
+            # SOCKS5 params
+            self.tor_port = socks_port
+            self.tor_host = socks_host
+
+            # The tor controller that will be used to receive signals
+            self.ctrl_port = ctrl_port
+
+            self.tor_controller = None
+            if self.use_tor:
+                self._setTorController()
+
+            # The control port password
+            self._setCtrlPass(ctrl_pass)
+            self._startSocks()
+
+            # If we want to make sure IP rotation is working
+            if test_rotate:
+                self._runTests()
 
         # Keep an IP address logged
         self.ip = self.check_ip()
-
-        # If we want to make sure IP rotation is working
-        if test_rotate:
-            self._runTests()
 
     def _setCtrlPass(self, p):
         """Set password for controller signaling."""
@@ -148,6 +148,9 @@ class TorCrawler(object):
             self.ctrl_pass = p
         elif "TOR_CTRL_PASS" in os.environ:
             self.ctrl_pass = os.environ["TOR_CTRL_PASS"]
+        else:
+            print("\nCan't found environment variable TOR_CTRL_PASS")
+            sys.exit(1)
 
     def _setTorController(self):
         """Initialize a Controller with the control port."""
@@ -162,12 +165,10 @@ class TorCrawler(object):
 
         All future requests will be made through this.
         """
-        socks.setdefaultproxy(
-            socks.PROXY_TYPE_SOCKS5,
-            self.tor_host,
-            self.tor_port
-        )
-        socket.socket = socks.socksocket
+        self.session.proxies = {}
+        proxy_info = 'socks5h://{}:{}'.format(self.tor_host, self.tor_port)
+        self.session.proxies['http'] = proxy_info
+        self.session.proxies['https'] = proxy_info
 
     def _runTests(self):
         """Setup tests upon initialization."""
@@ -238,7 +239,7 @@ class TorCrawler(object):
 
     def _checkConvert(self, url, headers=None):
         """Check if we need to return a BeautifulSoup object (or raw res)."""
-        page = requests.get(url, headers=headers)
+        page = self.session.get(url, headers=headers)
         if self.use_bs:
             return BeautifulSoup(page.content, 'html.parser')
         else:
@@ -253,7 +254,7 @@ class TorCrawler(object):
 
     def check_ip(self):
         """Check my public IP via tor."""
-        return requests.get("http://www.icanhazip.com").text[:-2]
+        return self.session.get("http://www.icanhazip.com").text[:-1]
 
     def rotate(self):
         """Redraw the tor circuit and (hopefully) change the IP."""
@@ -278,11 +279,13 @@ class TorCrawler(object):
     def get(self, url, headers=None):
         """Return either BeautifulSoup object or raw response from GET."""
         res = self._checkConvert(url, headers)
-        self._updateCount()
+        if self.use_tor:
+            self._updateCount()
         return res
 
     def post(self, url, data, headers=None):
         """Return raw response from POST request."""
-        res = requests.post(url, data=data, headers=headers)
-        self._updateCount()
+        res = self.session.post(url, data=data, headers=headers)
+        if self.use_tor:
+            self._updateCount()
         return res

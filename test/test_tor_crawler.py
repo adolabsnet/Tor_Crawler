@@ -84,3 +84,15 @@ def test_post():
     fakedata = {"Key":"test", "Sign":"test"}
     r = TOR_CRAWLER.post("https://poloniex.com/tradingApi", fakedata)
     assert type(r) == requests.models.Response
+
+def test_onion_domain():
+    headers = {
+        "User-Agent":
+            "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:65.0) "
+            "Gecko/20100101 Firefox/65.0"
+    }
+    TOR_CRAWLER.use_bs = True
+    # The Hidden Wiki
+    r = TOR_CRAWLER.get("http://zqktlwi4fecvo6ri.onion/wiki/index.php/Main_Page",
+                        headers=headers)
+    assert type(r) == bs4.BeautifulSoup
